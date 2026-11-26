@@ -1,0 +1,34 @@
+---
+# Reference solution for the kubeadm upgrade drill.
+# Practise it by hand first: scenarios/05-kubeadm-upgrade.
+#
+#   ansible-playbook upgrade.yml -e kubernetes_upgrade_version=1.37
+
+- name: Upgrade first control plane node
+  hosts: control_plane[0]
+  become: true
+  roles:
+    - role: node_upgrade
+      vars:
+        node_upgrade_series: "{{ kubernetes_upgrade_version }}"
+        node_upgrade_apply: true
+
+- name: Upgrade remaining control plane nodes
+  hosts: control_plane[1:]
+  become: true
+  serial: 1
+  roles:
+    - role: node_upgrade
+      vars:
+        node_upgrade_series: "{{ kubernetes_upgrade_version }}"
+        node_upgrade_apply: false
+
+- name: Upgrade workers
+  hosts: workers
+  become: true
+  serial: 1
+  roles:
+    - role: node_upgrade
+      vars:
+        node_upgrade_series: "{{ kubernetes_upgrade_version }}"
+        node_upgrade_apply: false

@@ -1,0 +1,39 @@
+---
+# Since Calico 3.30 the operator CRDs ship separately from the operator.
+# Server-side apply: the CRDs are too large for the last-applied annotation.
+- name: Install Calico operator CRDs
+  ansible.builtin.command: >-
+    kubectl --kubeconfig {{ admin_kubeconfig }} apply --server-side -f
+    https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/operator-crds.yaml
+  # Server-side apply reports every object as applied, changed or not.
+  changed_when: false
+
+- name: Check for tigera-operator
+  ansible.builtin.command: kubectl --kubeconfig {{ admin_kubeconfig }} get namespace tigera-operator
+  register: cni_calico_operator_ns
+  changed_when: false
+  failed_when: false
+
+- name: Install tigera-operator
+  ansible.builtin.command: >-
+    kubectl --kubeconfig {{ admin_kubeconfig }} create -f
+    https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml
+  when: cni_calico_operator_ns.rc != 0
+  changed_when: true
+
+- name: Wait for the Installation CRD
+  ansible.builtin.command: >-
+    kubectl --kubeconfig {{ admin_kubeconfig }}
+    wait --for=condition=Established crd/installations.operator.tigera.io --timeout=120s
+  changed_when: false
+
+- name: Render Calico installation
+  ansible.builtin.template:
+    src: calico-installation.yaml.j2
+    dest: /etc/kubernetes/calico-installation.yaml
+    mode: "0644"
+
+- name: Apply Calico installation
+  ansible.builtin.command: kubectl --kubeconfig {{ admin_kubeconfig }} apply -f /etc/kubernetes/calico-installation.yaml
+  register: cni_calico_apply
+  changed_when: "'unchanged' not in cni_calico_apply.stdout"

@@ -1,0 +1,15 @@
+version: 2
+ethernets:
+  enp1s0:
+    match:
+      macaddress: "${mac}"
+    set-name: enp1s0
+    addresses:
+      - ${ip}/${prefix_length}
+    routes:
+      - to: default
+        via: ${gateway}
+    # No search domain: pods inherit it, and with ndots:5 every external
+    # name would first hit the wildcard record of the lab domain.
+    nameservers:
+      addresses: [${gateway}]

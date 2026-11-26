@@ -1,0 +1,24 @@
+---
+# Kubernetes minor series to install. One below the latest, so the
+# kubeadm upgrade drill has a target.
+kubernetes_version: "1.36"
+kubernetes_upgrade_version: "1.37"
+
+cluster_name: k8s-flightsim
+pod_cidr: "10.244.0.0/16"
+service_cidr: "10.96.0.0/12"
+
+calico_version: "v3.33.0"
+
+# etcdctl/etcdutl on the control plane nodes (etcd backup drills).
+etcd_client_version: "v3.6.16"
+
+kube_vip_version: "v1.3.1"
+kube_vip_image: "ghcr.io/kube-vip/kube-vip:{{ kube_vip_version }}"
+kube_vip_interface: enp1s0
+
+# First control plane node runs `kubeadm init`, the others join.
+first_control_plane: "{{ groups['control_plane'] | first }}"
+admin_kubeconfig: /etc/kubernetes/admin.conf
+# Written to the workstation. just sets KUBECONFIG to the XDG data directory.
+local_kubeconfig: "{{ lookup('env', 'KUBECONFIG') | default(lookup('env', 'HOME') ~ '/.local/share/k8s-flightsim/kubeconfig', true) }}"

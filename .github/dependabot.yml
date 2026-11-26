@@ -1,0 +1,18 @@
+version: 2
+updates:
+  # Workflows pin actions to commit SHAs. Dependabot replaces the SHA and the
+  # version comment behind it when a new release tag appears.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  # Provider versions from terraform/.terraform.lock.hcl.
+  - package-ecosystem: terraform
+    directory: /terraform
+    schedule:
+      interval: weekly

@@ -1,0 +1,21 @@
+# k8s-flightsim PKI settings, skeleton.
+#
+# `just init` copies this file to ~/.config/k8s-flightsim/pki.toml if no
+# configuration exists there. The copy is yours: it is never overwritten.
+# Only public keys and paths belong here, never a private key.
+
+# Who can decrypt the root CA key. age encrypts the key to these recipients
+# without asking for anything. Give the keys inline, a recipients file, or
+# both. age public keys (age1...) and SSH public keys (ssh-ed25519 ...) work.
+# With no recipient at all, `just pki init` asks for a passphrase instead.
+age_recipients = [
+    # "age1...",
+]
+age_recipients_file = ""    # e.g. "~/.config/age/recipients.txt"
+
+# Identity used to decrypt the root key when signing a new intermediate CA
+# (`just pki rotate-intermediate`). A passphrase-protected identity file
+# works: age asks for its passphrase on the terminal. Plugin identities
+# (age-plugin-yubikey) work as well. Empty: age asks for the passphrase the
+# root key was encrypted with (only without recipients above).
+age_identity_file = ""      # e.g. "~/.config/age/keys.txt"

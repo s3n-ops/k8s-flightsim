@@ -1,0 +1,135 @@
+---
+- name: Disable swap now
+  ansible.builtin.command: swapoff -a
+  changed_when: false
+
+- name: Disable swap in fstab
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\sswap\s.*)$'
+    replace: '# \1'
+
+- name: Load kernel modules on boot
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/k8s.conf
+    content: |
+      overlay
+      br_netfilter
+    mode: "0644"
+
+- name: Load kernel modules now
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop: [overlay, br_netfilter]
+
+- name: Kernel parameters for Kubernetes networking
+  ansible.posix.sysctl:
+    name: "{{ item }}"
+    value: "1"
+    sysctl_file: /etc/sysctl.d/k8s.conf
+    reload: true
+  loop:
+    - net.bridge.bridge-nf-call-iptables
+    - net.bridge.bridge-nf-call-ip6tables
+    - net.ipv4.ip_forward
+
+# containerd
+- name: Install containerd
+  ansible.builtin.apt:
+    name: containerd
+    state: present
+    update_cache: true
+
+- name: Create default containerd config
+  ansible.builtin.shell:
+    cmd: mkdir -p /etc/containerd && containerd config default > /etc/containerd/config.toml
+    creates: /etc/containerd/config.toml
+
+- name: Use the systemd cgroup driver
+  ansible.builtin.replace:
+    path: /etc/containerd/config.toml
+    regexp: 'SystemdCgroup = false'
+    replace: 'SystemdCgroup = true'
+  notify: Restart containerd
+
+- name: Enable containerd
+  ansible.builtin.systemd:
+    name: containerd
+    enabled: true
+    state: started
+
+- name: Point crictl at containerd
+  ansible.builtin.copy:
+    dest: /etc/crictl.yaml
+    content: |
+      runtime-endpoint: unix:///run/containerd/containerd.sock
+      image-endpoint: unix:///run/containerd/containerd.sock
+    mode: "0644"
+
+- name: Apply containerd config before kubeadm runs
+  ansible.builtin.meta: flush_handlers
+
+# Node tools
+# The minimal cloud image lacks tools kubeadm checks for and an editor for
+# the exercises (static pod manifests, drills).
+- name: Install node tools
+  ansible.builtin.apt:
+    name: [conntrack, iptables, socat, ethtool, vim, less, bash-completion]
+    state: present
+
+# Kubernetes packages
+# python3-debian is required by deb822_repository and missing in the
+# minimal image.
+- name: Install apt prerequisites
+  ansible.builtin.apt:
+    name: [apt-transport-https, ca-certificates, curl, gpg, python3-debian]
+    state: present
+
+- name: Create keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Configure Kubernetes apt repository
+  ansible.builtin.include_role:
+    name: k8s_repo
+
+- name: Install kubeadm, kubelet, kubectl
+  ansible.builtin.apt:
+    name: [kubelet, kubeadm, kubectl]
+    state: present
+
+- name: Hold Kubernetes packages
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: [kubelet, kubeadm, kubectl]
+
+- name: Enable kubelet
+  ansible.builtin.systemd:
+    name: kubelet
+    enabled: true
+
+- name: Install etcdctl and etcdutl for etcd drills
+  when: inventory_hostname in groups['control_plane']
+  block:
+    - name: Download etcd release
+      ansible.builtin.unarchive:
+        src: "https://github.com/etcd-io/etcd/releases/download/{{ etcd_client_version }}/etcd-{{ etcd_client_version }}-linux-amd64.tar.gz"
+        dest: /usr/local/bin
+        remote_src: true
+        extra_opts: [--strip-components=1, --wildcards, "*/etcdctl", "*/etcdutl"]
+        creates: /usr/local/bin/etcdutl
+
+    - name: Default etcdctl to the local member
+      ansible.builtin.copy:
+        dest: /etc/profile.d/etcdctl.sh
+        content: |
+          export ETCDCTL_API=3
+          export ETCDCTL_ENDPOINTS=https://127.0.0.1:2379
+          export ETCDCTL_CACERT=/etc/kubernetes/pki/etcd/ca.crt
+          export ETCDCTL_CERT=/etc/kubernetes/pki/etcd/server.crt
+          export ETCDCTL_KEY=/etc/kubernetes/pki/etcd/server.key
+        mode: "0644"

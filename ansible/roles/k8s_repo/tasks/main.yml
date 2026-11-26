@@ -1,0 +1,29 @@
+---
+# Points the Kubernetes apt repository at one minor series.
+# Pass k8s_repo_series (e.g. 1.37) to switch; defaults to kubernetes_version.
+- name: Determine repository series
+  ansible.builtin.set_fact:
+    k8s_repo_active: "{{ k8s_repo_series | default(kubernetes_version) }}"
+
+- name: Install Kubernetes signing key for {{ k8s_repo_active }}
+  ansible.builtin.get_url:
+    url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_repo_active }}/deb/Release.key"
+    dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
+    mode: "0644"
+    force: true
+
+- name: Configure apt repository for {{ k8s_repo_active }}
+  ansible.builtin.deb822_repository:
+    name: kubernetes
+    types: deb
+    uris: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_repo_active }}/deb/"
+    suites: "/"
+    signed_by: /etc/apt/keyrings/kubernetes-apt-keyring.asc
+    state: present
+    enabled: true
+  register: k8s_repo_change
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+  when: k8s_repo_change.changed

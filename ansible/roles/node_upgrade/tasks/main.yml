@@ -1,0 +1,75 @@
+---
+# Upgrades one node to node_upgrade_series, following the kubeadm docs:
+# kubeadm first, then `kubeadm upgrade apply|node`, then drain,
+# kubelet/kubectl, restart kubelet, uncordon.
+#
+# node_upgrade_apply: true only on the first control plane node.
+
+- name: Switch apt repository to the target series
+  ansible.builtin.include_role:
+    name: k8s_repo
+  vars:
+    k8s_repo_series: "{{ node_upgrade_series }}"
+
+- name: Find newest patch release of the target series
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      apt-cache madison kubeadm | awk '{print $3}' | grep '^{{ node_upgrade_series }}\.' | sort -V | tail -1
+    executable: /bin/bash
+  register: node_upgrade_pkg
+  changed_when: false
+  failed_when: node_upgrade_pkg.stdout | length == 0
+
+- name: Upgrade kubeadm
+  ansible.builtin.apt:
+    name: "kubeadm={{ node_upgrade_pkg.stdout }}"
+    allow_change_held_packages: true
+
+- name: Run kubeadm upgrade apply
+  ansible.builtin.command: "kubeadm upgrade apply -y v{{ node_upgrade_pkg.stdout | regex_replace('-.*$', '') }}"
+  when: node_upgrade_apply | bool
+  changed_when: true
+
+- name: Run kubeadm upgrade node
+  ansible.builtin.command: kubeadm upgrade node
+  when: not (node_upgrade_apply | bool)
+  changed_when: true
+
+- name: Drain node
+  ansible.builtin.command: >-
+    kubectl --kubeconfig {{ admin_kubeconfig }} drain {{ inventory_hostname }}
+    --ignore-daemonsets --delete-emptydir-data --timeout=300s
+  delegate_to: "{{ first_control_plane }}"
+  changed_when: true
+
+- name: Upgrade kubelet and kubectl
+  ansible.builtin.apt:
+    name:
+      - "kubelet={{ node_upgrade_pkg.stdout }}"
+      - "kubectl={{ node_upgrade_pkg.stdout }}"
+    allow_change_held_packages: true
+
+- name: Hold Kubernetes packages
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: [kubeadm, kubelet, kubectl]
+
+- name: Restart kubelet
+  ansible.builtin.systemd:
+    name: kubelet
+    daemon_reload: true
+    state: restarted
+
+- name: Wait until node is Ready
+  ansible.builtin.command: >-
+    kubectl --kubeconfig {{ admin_kubeconfig }}
+    wait --for=condition=Ready node/{{ inventory_hostname }} --timeout=300s
+  delegate_to: "{{ first_control_plane }}"
+  changed_when: false
+
+- name: Uncordon node
+  ansible.builtin.command: kubectl --kubeconfig {{ admin_kubeconfig }} uncordon {{ inventory_hostname }}
+  delegate_to: "{{ first_control_plane }}"
+  changed_when: true

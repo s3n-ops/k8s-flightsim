@@ -1,0 +1,37 @@
+#cloud-config
+hostname: ${hostname}
+fqdn: ${hostname}.${dns_domain}
+# We own /etc/hosts. With manage_etc_hosts: true cloud-init would
+# rewrite it on every boot and drop the cluster entries.
+manage_etc_hosts: false
+
+users:
+  - name: ${vm_user}
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ${ssh_public_key}
+
+write_files:
+  - path: /etc/hosts
+    owner: root:root
+    permissions: "0644"
+    content: |
+      127.0.0.1 localhost
+      ::1 localhost ip6-localhost ip6-loopback
+      ${api_vip} api api.${dns_domain}
+%{ for name, n in nodes ~}
+      ${n.ip} ${name} ${name}.${dns_domain}
+%{ endfor ~}
+
+package_update: true
+package_upgrade: false
+packages:
+  - qemu-guest-agent
+
+runcmd:
+  - systemctl enable --now qemu-guest-agent
+  # Return freed blocks to the sparse qcow2 files on the host.
+  - systemctl enable --now fstrim.timer
+  - swapoff -a

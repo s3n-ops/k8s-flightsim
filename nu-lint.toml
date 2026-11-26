@@ -1,0 +1,31 @@
+# nu-lint configuration for k8s-flightsim, based on the agentonaut config.
+#
+# Rules: https://codeberg.org/wvhulle/nu-lint
+
+skip_external_parse_errors = false
+explicit_optional_access = false
+
+[rules]
+# Project style quotes string arguments for safety.
+string_may_be_bare = "off"
+
+# Enforce Nushell standard for constants
+screaming_snake_constants = "warning"
+
+# Enforce clean pipelines (no mixed output)
+print_and_return_data = "hint"
+
+# Same as agentonaut: kubectl, virsh and ssh are called as externals on
+# purpose, the caret makes that explicit.
+remove_hat_not_builtin = "off"
+
+# The scripts rely on Nushell raising an error when a builtin or an external
+# command fails. Errors stop the script with a clear message, which is the
+# intended behaviour. `complete` is used where a failure is an expected
+# result (verify scripts, node-try).
+catch_builtin_error_try = "off"
+wrap_external_with_complete = "off"
+
+# External commands that are not the last statement print to the terminal.
+# `| ignore` silences them on purpose.
+redundant_ignore = "off"

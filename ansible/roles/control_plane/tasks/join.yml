@@ -1,0 +1,22 @@
+---
+- name: Join block
+  when: not control_plane_kubelet_conf.stat.exists
+  block:
+    - name: Join as control plane node
+      ansible.builtin.command: >-
+        {{ hostvars[first_control_plane].control_plane_join_cmd }}
+        --control-plane
+        --certificate-key {{ hostvars[first_control_plane].control_plane_cert_key }}
+        --apiserver-advertise-address {{ ansible_host }}
+        --node-name {{ inventory_hostname }}
+      args:
+        creates: /etc/kubernetes/kubelet.conf
+      no_log: true
+
+    # After the join: kubeadm refuses to join when /etc/kubernetes/manifests
+    # is not empty, and admin.conf exists only now.
+    - name: Install kube-vip
+      ansible.builtin.include_role:
+        name: kube_vip
+      vars:
+        kube_vip_kubeconfig: /etc/kubernetes/admin.conf

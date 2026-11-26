@@ -1,0 +1,10 @@
+# k8s-flightsim backup settings, skeleton.
+#
+# `just init` copies this file to ~/.config/k8s-flightsim/backup.toml if no
+# configuration exists there. The copy is yours: it is never overwritten.
+
+# Directory on the host that `just backup-target` serves as S3 to the
+# cluster. Velero writes into its subdirectory "velero". Put it on a
+# different disk than the VM pool, so a failed pool disk does not take the
+# backups with it.
+backup_path = ""    # e.g. "/srv/backup/k8s-flightsim"

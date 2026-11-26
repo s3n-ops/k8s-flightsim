@@ -13,14 +13,37 @@
 use lab.nu
 
 const NAMESPACE = "velero"
+const SCHEDULE = "velero-daily"
 const FINAL_PHASES = ["Completed" "PartiallyFailed" "Failed" "FailedValidation"]
 
 # Phase of a Velero object, empty while Velero has not picked it up.
+# Kinds are fully qualified: "backup" alone also names the CloudNativePG kind.
 def phase [kind: string, name: string]: nothing -> string {
     let result = (
-        ^kubectl -n $NAMESPACE get $kind $name -o "jsonpath={.status.phase}" | complete
+        ^kubectl -n $NAMESPACE get $"($kind)s.velero.io" $name -o "jsonpath={.status.phase}" | complete
     )
     if $result.exit_code != 0 { "" } else { $result.stdout | str trim }
+}
+
+# Items done of all items, e.g. "412/999", empty before Velero counts.
+def progress [kind: string, name: string]: nothing -> string {
+    let result = (
+        ^kubectl -n $NAMESPACE get $"($kind)s.velero.io" $name
+            -o "jsonpath={.status.progress.itemsBackedUp}{.status.progress.itemsRestored}/{.status.progress.totalItems}"
+        | complete
+    )
+    let text = ($result.stdout | str trim)
+    if $result.exit_code != 0 or $text == "/" { "" } else { $text }
+}
+
+# Template of the daily schedule from the GitOps repository, so manual
+# backups cover the same namespaces and volumes.
+def schedule-template []: nothing -> record {
+    let result = (^kubectl -n $NAMESPACE get schedules.velero.io $SCHEDULE -o json | complete)
+    if $result.exit_code != 0 {
+        error make --unspanned {msg: $"schedule ($SCHEDULE) not found: ($result.stderr | str trim)"}
+    }
+    $result.stdout | from json | get spec.template
 }
 
 # Waits until a backup or restore has finished. Gives up after 30 minutes.
@@ -30,9 +53,10 @@ def wait-final [kind: string, name: string]: nothing -> string {
     mut tries = 0
     while ($final | is-empty) and $tries < 360 {
         let current = (phase $kind $name)
-        if $current != $last and ($current | is-not-empty) {
-            lab info $"($kind) ($name): ($current)"
-            $last = $current
+        let line = $"($current) (progress $kind $name)" | str trim
+        if $line != $last and ($current | is-not-empty) {
+            lab info $"($kind) ($name): ($line)"
+            $last = $line
         }
         if $current in $FINAL_PHASES {
             $final = $current
@@ -54,7 +78,7 @@ def require-storage []: nothing -> nothing {
         error make --unspanned {msg: "backup target is not running: set backup_path in backup.toml, run just secrets, then just start"}
     }
     let result = (
-        ^kubectl -n $NAMESPACE get backupstoragelocation default -o "jsonpath={.status.phase}"
+        ^kubectl -n $NAMESPACE get backupstoragelocations.velero.io default -o "jsonpath={.status.phase}"
         | complete
     )
     if $result.exit_code != 0 {
@@ -81,7 +105,7 @@ def report [kind: string, name: string, final: string]: nothing -> nothing {
     } else {
         lab fail $"($kind) ($name) ended with phase ($final)"
         let details = (
-            ^kubectl -n $NAMESPACE get $kind $name -o "jsonpath={.status}" | complete
+            ^kubectl -n $NAMESPACE get $"($kind)s.velero.io" $name -o "jsonpath={.status}" | complete
         )
         if $details.exit_code == 0 { print ($details.stdout | from json | to yaml) }
         error make --unspanned {msg: $"($kind) ($name): ($final)"}
@@ -99,8 +123,10 @@ def "main create" [
     let backup_name = if ($name | is-empty) {
         $"manual-(date now | format date '%Y%m%d-%H%M%S')"
     } else { $name }
-    print $"Backup ($backup_name): all namespaces, volumes with Kopia."
-    print "CloudNativePG pods and volumes are excluded. Kept for 30 days."
+    let spec = (schedule-template | upsert ttl "720h0m0s")
+    let excluded = ($spec.excludedNamespaces? | default [] | str join ", ")
+    print $"Backup ($backup_name): all namespaces except ($excluded), volumes with Kopia."
+    print "CloudNativePG and emptyDir volumes are skipped. Kept for 30 days."
     if not (lab confirm "Create the backup?") {
         lab info "cancelled"
         return
@@ -109,12 +135,7 @@ def "main create" [
         apiVersion: "velero.io/v1"
         kind: "Backup"
         metadata: {name: $backup_name, namespace: $NAMESPACE}
-        spec: {
-            includedNamespaces: ["*"]
-            defaultVolumesToFsBackup: true
-            storageLocation: "default"
-            ttl: "720h0m0s"
-        }
+        spec: $spec
     }
     report "backup" $backup_name (wait-final "backup" $backup_name)
 }

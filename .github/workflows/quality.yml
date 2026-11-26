@@ -27,6 +27,11 @@ jobs:
         with:
           tflint_version: v0.66.0
 
+      # ansible-core 2.22 needs Python 3.13 or later, the runner has 3.12.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
       - name: Install Ansible
         run: |
           python3 -m venv "$RUNNER_TEMP/venv"

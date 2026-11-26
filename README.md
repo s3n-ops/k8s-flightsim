@@ -281,6 +281,19 @@ namespaces and copies the contents of volumes with Kopia. The backups go to
 a directory on the host, outside the cluster and outside the VM pool, so
 they survive the loss of both.
 
+| | `just snapshot` | `just backup` |
+|---|---|---|
+| Tool | libvirt, internal qcow2 snapshots | Velero in the cluster, Kopia for volumes |
+| Saves | the complete disks of all VMs | Kubernetes objects and volume contents |
+| Stored in | the qcow2 files in the VM pool | `backup_path` on the host |
+| Cluster during the run | shut down | running |
+| Survives `just down` | no | yes |
+| Used for | resetting after an exercise | practising disaster recovery |
+
+A reset does not touch the backup directory. Velero compares its backup
+list with the storage regularly, so backups taken after a snapshot appear
+again after `just reset`.
+
 ```mermaid
 flowchart LR
     velero["Velero and node agent<br/>in the cluster"]
@@ -303,7 +316,9 @@ transient systemd user unit, `k8s-flightsim-s3`. `just stop` and
 after a reboot. `just status` shows its state.
 
 Velero backs up all namespaces every 24 hours and keeps each backup for 7
-days. The interval counts from the last backup, so a backup that was due
+days. The system namespaces (`kube-system`, `calico-system` and others)
+and `emptyDir` volumes are skipped: Ansible rebuilds the first, the second
+hold scratch data only. `just backup` uses the same settings. The interval counts from the last backup, so a backup that was due
 while the lab was off runs soon after the next start. Manual backups are
 kept for 30 days.
 
@@ -582,7 +597,6 @@ ansible/       kubeadm cluster with HA control plane, upgrade reference solution
 scripts/       Nushell: snapshots, scenario runner, SSH, PKI, Secrets, checks
 scenarios/     Break and verify
 docs/runbooks/ Problem and solution
-examples/      Seed data, e.g. Miniflux feeds (OPML)
 ```
 
 ## Development
